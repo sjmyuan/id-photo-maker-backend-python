@@ -9,10 +9,9 @@ from src.services.face_detect_orchestrator import detect_face_in_image
 from src.services.face_detection_service import FaceDetectionModel
 from src.services.image_processing_orchestrator import process_image
 from src.services.u2net_service import U2NetModel
-from src.types.index import SIZE_OPTIONS_BY_ID, PaperMargins
+from src.types.index import SIZE_OPTIONS_BY_ID
 
 ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
-PAPER_TYPES = {"6-inch", "a4"}
 
 
 @dataclass
@@ -113,11 +112,7 @@ def create_app(models: Models) -> FastAPI:
         image: UploadFile = File(...),
         sizeId: str = Form(...),
         backgroundColor: str = Form(...),
-        paperType: str = Form(...),
-        margins: str | None = Form(default=None),
-        dpi: str | None = Form(default=None),
     ) -> JSONResponse:
-        import json
         import re
 
         data = await image.read()
@@ -188,82 +183,12 @@ def create_app(models: Models) -> FastAPI:
                 },
             )
 
-        # Validate paperType
-        if paperType not in PAPER_TYPES:
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "success": False,
-                    "errors": [
-                        {
-                            "type": "validation",
-                            "message": ('paperType must be "6-inch" or "a4".'),
-                        }
-                    ],
-                },
-            )
-
-        # Parse margins
-        paper_margins = PaperMargins(top=0, bottom=0, left=0, right=0)
-        if margins:
-            try:
-                m = json.loads(margins)
-                keys = ("top", "bottom", "left", "right")
-                if not all(
-                    k in m and isinstance(m[k], (int, float)) and m[k] >= 0
-                    for k in keys
-                ):
-                    raise ValueError
-                paper_margins = PaperMargins(
-                    top=m["top"], bottom=m["bottom"], left=m["left"], right=m["right"]
-                )
-            except (json.JSONDecodeError, ValueError, KeyError):
-                return JSONResponse(
-                    status_code=400,
-                    content={
-                        "success": False,
-                        "errors": [
-                            {
-                                "type": "validation",
-                                "message": (
-                                    "margins must have non-negative numeric "
-                                    "top, bottom, left, right fields."
-                                ),
-                            }
-                        ],
-                    },
-                )
-
-        # Parse dpi
-        required_dpi = 300
-        if dpi is not None:
-            try:
-                required_dpi = int(dpi)
-                if required_dpi <= 0:
-                    raise ValueError
-            except ValueError:
-                return JSONResponse(
-                    status_code=400,
-                    content={
-                        "success": False,
-                        "errors": [
-                            {
-                                "type": "validation",
-                                "message": ("dpi must be a positive integer."),
-                            }
-                        ],
-                    },
-                )
-
         orch_result = process_image(
             image_data=data,
             mime_type=mime,
             selected_size=selected_size,
             background_color=backgroundColor,
-            paper_type=paperType,
-            margins=paper_margins,
             u2net_model=models.u2net,
-            required_dpi=required_dpi,
         )
 
         if orch_result.errors:
@@ -284,7 +209,6 @@ def create_app(models: Models) -> FastAPI:
                 "success": True,
                 "warnings": orch_result.warnings,
                 "idPhoto": r.id_photo_b64,
-                "printLayout": r.print_layout_b64,
             }
         )
 

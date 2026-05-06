@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 from PIL import Image
 
 from src.services.image_processing_orchestrator import process_image
-from src.types.index import SIZE_OPTIONS_BY_ID, PaperMargins
+from src.types.index import SIZE_OPTIONS_BY_ID
 
 
 def _make_image_bytes(width: int = 295, height: int = 413) -> bytes:
@@ -19,10 +19,6 @@ def _make_image_bytes(width: int = 295, height: int = 413) -> bytes:
 
 def _make_png_bytes(width: int = 295, height: int = 413) -> bytes:
     return _make_image_bytes(width, height)
-
-
-def _default_margins() -> PaperMargins:
-    return PaperMargins(top=0, bottom=0, left=0, right=0)
 
 
 SELECTED_SIZE = SIZE_OPTIONS_BY_ID["1-inch"]  # 25×35 mm
@@ -46,7 +42,7 @@ class TestProcessImagePreCropped:
         sig = inspect.signature(process_image)
         assert "face_detection_model" not in sig.parameters
 
-    def test_returns_success_with_b64_images(self) -> None:
+    def test_returns_success_with_b64_id_photo(self) -> None:
         image_data = _make_png_bytes()
         u2net = MagicMock()
         _mod = "src.services.image_processing_orchestrator"
@@ -54,22 +50,18 @@ class TestProcessImagePreCropped:
         with (
             patch(f"{_mod}.remove_background", return_value=_make_png_bytes()),
             patch(f"{_mod}.generate_exact_crop", return_value=_make_png_bytes()),
-            patch(f"{_mod}.generate_print_layout", return_value=b"layout"),
         ):
             result = process_image(
                 image_data=image_data,
                 mime_type="image/png",
                 selected_size=SELECTED_SIZE,
                 background_color="#0000FF",
-                paper_type="6-inch",
-                margins=_default_margins(),
                 u2net_model=u2net,
             )
 
         assert result.errors == []
         assert result.result is not None
         assert len(result.result.id_photo_b64) > 0
-        assert len(result.result.print_layout_b64) > 0
 
     def test_dpi_warning_when_below_required(self) -> None:
         """Low-res crop → DPI warning (not error), processing still continues."""
@@ -81,15 +73,12 @@ class TestProcessImagePreCropped:
         with (
             patch(f"{_mod}.remove_background", return_value=_make_png_bytes()),
             patch(f"{_mod}.generate_exact_crop", return_value=_make_png_bytes()),
-            patch(f"{_mod}.generate_print_layout", return_value=b"layout"),
         ):
             result = process_image(
                 image_data=image_data,
                 mime_type="image/png",
                 selected_size=SELECTED_SIZE,
                 background_color="#FFFFFF",
-                paper_type="6-inch",
-                margins=_default_margins(),
                 u2net_model=u2net,
                 required_dpi=300,
             )
@@ -108,8 +97,6 @@ class TestProcessImagePreCropped:
             mime_type="image/gif",
             selected_size=SELECTED_SIZE,
             background_color="#FFFFFF",
-            paper_type="6-inch",
-            margins=_default_margins(),
             u2net_model=u2net,
         )
 

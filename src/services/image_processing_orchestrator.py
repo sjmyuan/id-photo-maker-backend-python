@@ -6,12 +6,10 @@ from PIL import Image
 
 from src.services.exact_crop_service import generate_exact_crop
 from src.services.image_validation import validate_image_buffer
-from src.services.print_layout_service import generate_print_layout
 from src.services.u2net_service import U2NetModel, remove_background
-from src.types.index import PaperMargins, SizeOption
+from src.types.index import SizeOption
 from src.utils.crop_area_calculation import CropArea
 from src.utils.dpi_calculation import calculate_dpi
-from src.utils.layout_calculation import PhotoSize
 
 
 @dataclass
@@ -23,7 +21,6 @@ class ProcessingError:
 @dataclass
 class ProcessingResult:
     id_photo_b64: str
-    print_layout_b64: str
 
 
 @dataclass
@@ -45,8 +42,6 @@ def process_image(
     mime_type: str,
     selected_size: SizeOption,
     background_color: str,
-    paper_type: str,
-    margins: PaperMargins,
     u2net_model: U2NetModel,
     required_dpi: int = 300,
 ) -> OrchestratorResult:
@@ -109,22 +104,9 @@ def process_image(
         composite.save(id_photo_buf, format="PNG")
         id_photo_data = id_photo_buf.getvalue()
 
-        # Step 6: Print layout
-        print_layout_data = generate_print_layout(
-            id_photo_data,
-            PhotoSize(
-                width_mm=selected_size.physical_width,
-                height_mm=selected_size.physical_height,
-            ),
-            paper_type,
-            required_dpi,
-            margins,
-        )
-
         return OrchestratorResult(
             result=ProcessingResult(
                 id_photo_b64=base64.b64encode(id_photo_data).decode(),
-                print_layout_b64=base64.b64encode(print_layout_data).decode(),
             ),
             warnings=warnings,
         )
