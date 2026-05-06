@@ -77,7 +77,9 @@ def detect_face_in_image(
             errors=[
                 DetectFaceError(
                     type="face-detection",
-                    message="Multiple faces detected. Please upload an image with exactly one face.",
+                    message=(
+                        "Multiple faces detected. Please upload an image with exactly one face."
+                    ),
                 )
             ],
             warnings=warnings,
