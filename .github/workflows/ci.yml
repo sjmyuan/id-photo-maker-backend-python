@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [master]
   pull_request:
-    branches: [main]
+    branches: [master]
 
 env:
   REGISTRY: ghcr.io
@@ -42,7 +42,7 @@ jobs:
     name: Docker
     runs-on: ubuntu-latest
     needs: test
-    # Only push on merges to main; PRs only build (no push)
+    # Only push on merges to master; PRs only build (no push)
     permissions:
       contents: read
       packages: write
@@ -68,7 +68,7 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=sha,prefix=sha-,format=short
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
