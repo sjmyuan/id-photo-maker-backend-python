@@ -203,6 +203,7 @@ def create_app(models: Models) -> FastAPI:
             )
 
         r = orch_result.result
+        assert r is not None
         return JSONResponse(
             content={
                 "success": True,

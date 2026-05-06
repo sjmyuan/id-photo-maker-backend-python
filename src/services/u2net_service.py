@@ -24,7 +24,7 @@ def remove_background(img: PILImage, model: U2NetModel) -> PILImage:
     """Remove background, accepting and returning a PIL Image to avoid redundant
     PNG encode/decode round-trips inside rembg.
     """
-    result = remove(img, session=model._session)  # type: ignore[arg-type]
+    result = remove(img, session=model._session)
     # rembg returns a PIL Image when given one; cast for type checker
     assert isinstance(result, Image.Image)
     return result

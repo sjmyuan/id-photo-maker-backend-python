@@ -22,7 +22,7 @@ class FaceDetectionResult:
 
 def load_face_detection_model() -> FaceDetectionModel:
     """Load MediaPipe short-range face detection model."""
-    mp_face = mp.solutions.face_detection  # type: ignore[attr-defined]
+    mp_face = mp.solutions.face_detection
     detector = mp_face.FaceDetection(model_selection=0, min_detection_confidence=0.5)
     return FaceDetectionModel(detector=detector)
 
@@ -35,7 +35,7 @@ def detect_faces_in_buffer(
     img_array = np.array(img)
     width, height = img.size
 
-    results = model.detector.process(img_array)  # type: ignore[union-attr]
+    results = model.detector.process(img_array)  # type: ignore[attr-defined]
 
     if not results.detections:
         return FaceDetectionResult(faces=[], error="no-face-detected")
