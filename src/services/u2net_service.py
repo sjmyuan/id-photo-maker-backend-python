@@ -1,5 +1,7 @@
 from rembg import new_session, remove
 
+from src import config
+
 
 class U2NetModel:
     """Thin wrapper around a rembg session."""
@@ -9,8 +11,10 @@ class U2NetModel:
 
 
 def load_u2net_model() -> U2NetModel:
-    """Load the U2Net model via rembg (downloads on first use, then caches)."""
-    session = new_session("u2net")
+    """Load the background removal model via rembg
+    (expects model pre-downloaded by download-models.sh).
+    """
+    session = new_session(config.BG_REMOVAL_MODEL)
     return U2NetModel(session)
 
 

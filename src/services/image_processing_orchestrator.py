@@ -5,23 +5,18 @@ from io import BytesIO
 from PIL import Image
 
 from src.services.exact_crop_service import generate_exact_crop
-from src.services.face_detection_service import (
-    FaceDetectionModel,
-    detect_faces_in_buffer,
-)
-from src.services.image_scaling import scale_image_to_target
 from src.services.image_validation import validate_image_buffer
 from src.services.print_layout_service import generate_print_layout
 from src.services.u2net_service import U2NetModel, remove_background
 from src.types.index import PaperMargins, SizeOption
-from src.utils.crop_area_calculation import CropArea, calculate_initial_crop_area
+from src.utils.crop_area_calculation import CropArea
 from src.utils.dpi_calculation import calculate_dpi
 from src.utils.layout_calculation import PhotoSize
 
 
 @dataclass
 class ProcessingError:
-    type: str  # "validation" | "face-detection" | "dpi" | "matting" | "processing"
+    type: str  # "validation" | "matting" | "processing"
     message: str
 
 
@@ -53,13 +48,17 @@ def process_image(
     paper_type: str,
     margins: PaperMargins,
     u2net_model: U2NetModel,
-    face_detection_model: FaceDetectionModel,
     required_dpi: int = 300,
 ) -> OrchestratorResult:
+    """Process a pre-cropped image: matting → exact resize → background → print layout.
+
+    The caller is responsible for sending an already-cropped face region.
+    Face detection and crop-area calculation are no longer performed here.
+    """
     warnings: list[str] = []
 
     try:
-        # Step 1: Validate
+        # Step 1: Validate MIME type and readability
         validation = validate_image_buffer(image_data, mime_type)
         if not validation.is_valid:
             return OrchestratorResult(
@@ -68,87 +67,27 @@ def process_image(
                     for m in validation.errors
                 ]
             )
-        warnings.extend(validation.warnings)
 
-        # Step 2: Scale down if needed
-        buf = (
-            scale_image_to_target(image_data)
-            if validation.needs_scaling
-            else image_data
-        )
-
-        # Step 3: Face detection
-        face_result = detect_faces_in_buffer(face_detection_model, buf)
-
-        if len(face_result.faces) == 0:
-            return OrchestratorResult(
-                errors=[
-                    ProcessingError(
-                        type="face-detection",
-                        message="No face detected. Please upload an image with exactly one face.",
-                    )
-                ],
-                warnings=warnings,
-            )
-        if len(face_result.faces) > 1:
-            return OrchestratorResult(
-                errors=[
-                    ProcessingError(
-                        type="face-detection",
-                        message=(
-                            "Multiple faces detected. Please upload an image with exactly one face."
-                        ),
-                    )
-                ],
-                warnings=warnings,
-            )
-
-        # Step 4: Calculate crop area
-        face = face_result.faces[0]
-        img = Image.open(BytesIO(buf))
-        img_w, img_h = img.size
-
-        crop_area: CropArea = calculate_initial_crop_area(
-            face, selected_size.aspect_ratio, img_w, img_h
-        )
-
-        # Step 5: Validate DPI
+        # Step 2: Defence-in-depth DPI check — warn if the crop is too low-res,
+        # but do not block processing (the frontend already validated this).
+        img_w, img_h = validation.dimensions
         dpi_result = calculate_dpi(
-            crop_area.width,
-            crop_area.height,
+            img_w,
+            img_h,
             selected_size.physical_width,
             selected_size.physical_height,
         )
         if dpi_result.min_dpi < required_dpi:
             calc_dpi = round(dpi_result.min_dpi)
-            return OrchestratorResult(
-                errors=[
-                    ProcessingError(
-                        type="dpi",
-                        message=(
-                            f"DPI requirement ({required_dpi} DPI) cannot be met. "
-                            f"Calculated DPI: {calc_dpi}. "
-                            "Please upload a higher-resolution image."
-                        ),
-                    )
-                ],
-                warnings=warnings,
+            warnings.append(
+                f"Image resolution ({calc_dpi} DPI) is below the recommended "
+                f"{required_dpi} DPI. Output quality may be reduced."
             )
 
-        # Step 6: Crop to face area
-        left = max(0, round(crop_area.x))
-        top = max(0, round(crop_area.y))
-        right = left + round(crop_area.width)
-        bottom = top + round(crop_area.height)
-        cropped_img = img.crop((left, top, right, bottom))
-        cropped_buf = BytesIO()
-        cropped_img.save(cropped_buf, format="PNG")
-        cropped_data = cropped_buf.getvalue()
+        # Step 3: Background removal via rembg/U2Net
+        transparent_data = remove_background(image_data, u2net_model)
 
-        # Step 7: Background removal via rembg/U2Net
-        transparent_data = remove_background(cropped_data, u2net_model)
-
-        # Step 8: Exact crop to final pixel dimensions
+        # Step 4: Exact crop to final pixel dimensions
         trans_img = Image.open(BytesIO(transparent_data))
         trans_w, trans_h = trans_img.size
         exact_data = generate_exact_crop(
@@ -159,7 +98,7 @@ def process_image(
             required_dpi,
         )
 
-        # Step 9: Apply background colour
+        # Step 5: Apply background colour
         exact_img = Image.open(BytesIO(exact_data)).convert("RGBA")
         photo_w, photo_h = exact_img.size
         bg = Image.new(
@@ -170,7 +109,7 @@ def process_image(
         composite.save(id_photo_buf, format="PNG")
         id_photo_data = id_photo_buf.getvalue()
 
-        # Step 10: Print layout
+        # Step 6: Print layout
         print_layout_data = generate_print_layout(
             id_photo_data,
             PhotoSize(

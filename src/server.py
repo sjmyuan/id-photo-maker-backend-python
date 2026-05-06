@@ -101,8 +101,6 @@ def create_app(models: Models) -> FastAPI:
         return JSONResponse(
             content={
                 "success": True,
-                "imageWidth": result.image_width,
-                "imageHeight": result.image_height,
                 "face": face_dict,
                 "warnings": result.warnings,
             }
@@ -228,7 +226,8 @@ def create_app(models: Models) -> FastAPI:
                             {
                                 "type": "validation",
                                 "message": (
-                                    "margins must have non-negative numeric top, bottom, left, right fields."
+                                    "margins must have non-negative numeric "
+                                    "top, bottom, left, right fields."
                                 ),
                             }
                         ],
@@ -264,7 +263,6 @@ def create_app(models: Models) -> FastAPI:
             paper_type=paperType,
             margins=paper_margins,
             u2net_model=models.u2net,
-            face_detection_model=models.face_detection,
             required_dpi=required_dpi,
         )
 

@@ -1,8 +1,7 @@
-import pytest
+from src.types.index import PaperMargins
 from src.utils.crop_area_calculation import FaceBox, calculate_initial_crop_area
 from src.utils.dpi_calculation import calculate_dpi
 from src.utils.layout_calculation import PhotoSize, calculate_layout
-from src.types.index import PaperMargins
 
 # ── crop_area_calculation ──────────────────────────────────────────────────────
 

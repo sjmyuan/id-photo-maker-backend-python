@@ -1,3 +1,4 @@
 .venv/
 .env.example
 PLAN.md
+**/__pycache__/
