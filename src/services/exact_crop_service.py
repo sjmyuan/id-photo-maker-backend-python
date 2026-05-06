@@ -16,6 +16,27 @@ def _target_pixel_dimensions(
     )
 
 
+def generate_exact_crop_from_image(
+    img: Image.Image,
+    crop_area: CropArea,
+    width_mm: float,
+    height_mm: float,
+    dpi: float,
+) -> Image.Image:
+    """Crop a region and resize to exact physical dimensions at the given DPI.
+    Accepts and returns PIL Image objects to avoid PNG encode/decode round-trips.
+    """
+    target_w, target_h = _target_pixel_dimensions(width_mm, height_mm, dpi)
+
+    left = max(0, round(crop_area.x))
+    top = max(0, round(crop_area.y))
+    right = left + round(crop_area.width)
+    bottom = top + round(crop_area.height)
+
+    cropped = img.crop((left, top, right, bottom))
+    return cropped.resize((target_w, target_h), Image.LANCZOS)
+
+
 def generate_exact_crop(
     source_data: bytes,
     crop_area: CropArea,
@@ -24,17 +45,8 @@ def generate_exact_crop(
     dpi: float,
 ) -> bytes:
     """Crop a region and resize to exact physical dimensions at the given DPI."""
-    target_w, target_h = _target_pixel_dimensions(width_mm, height_mm, dpi)
-
     img = Image.open(BytesIO(source_data))
-    left = max(0, round(crop_area.x))
-    top = max(0, round(crop_area.y))
-    right = left + round(crop_area.width)
-    bottom = top + round(crop_area.height)
-
-    cropped = img.crop((left, top, right, bottom))
-    resized = cropped.resize((target_w, target_h), Image.LANCZOS)
-
+    resized = generate_exact_crop_from_image(img, crop_area, width_mm, height_mm, dpi)
     buf = BytesIO()
     resized.save(buf, format="PNG")
     return buf.getvalue()

@@ -4,7 +4,7 @@ from io import BytesIO
 
 from PIL import Image
 
-from src.services.exact_crop_service import generate_exact_crop
+from src.services.exact_crop_service import generate_exact_crop_from_image
 from src.services.image_validation import validate_image_buffer
 from src.services.u2net_service import U2NetModel, remove_background
 from src.types.index import SizeOption
@@ -79,27 +79,31 @@ def process_image(
                 f"{required_dpi} DPI. Output quality may be reduced."
             )
 
-        # Step 3: Background removal via rembg/U2Net
-        transparent_data = remove_background(image_data, u2net_model)
+        # Step 3: Decode the image once for inference. A second open is needed here
+        # because validate_image_buffer calls img.verify() which closes the handle.
+        source_img = Image.open(BytesIO(image_data))
 
-        # Step 4: Exact crop to final pixel dimensions
-        trans_img = Image.open(BytesIO(transparent_data))
-        trans_w, trans_h = trans_img.size
-        exact_data = generate_exact_crop(
-            transparent_data,
-            CropArea(x=0, y=0, width=trans_w, height=trans_h),
+        # Step 4: Background removal via rembg/U2Net.
+        # Pass a PIL Image in and receive one back to avoid rembg's internal
+        # PNG decode and re-encode (saves ~2 full image decode/encode cycles).
+        trans_img = remove_background(source_img, u2net_model)
+
+        # Step 5: Exact crop to final pixel dimensions.
+        exact_img = generate_exact_crop_from_image(
+            trans_img,
+            CropArea(x=0, y=0, width=img_w, height=img_h),
             selected_size.physical_width,
             selected_size.physical_height,
             required_dpi,
         )
 
-        # Step 5: Apply background colour
-        exact_img = Image.open(BytesIO(exact_data)).convert("RGBA")
-        photo_w, photo_h = exact_img.size
+        # Step 6: Apply background colour (exact_img is already a PIL Image — no re-decode).
+        exact_rgba = exact_img.convert("RGBA")
+        photo_w, photo_h = exact_rgba.size
         bg = Image.new(
             "RGBA", (photo_w, photo_h), (*_hex_to_rgb(background_color), 255)
         )
-        composite = Image.alpha_composite(bg, exact_img).convert("RGB")
+        composite = Image.alpha_composite(bg, exact_rgba).convert("RGB")
         id_photo_buf = BytesIO()
         composite.save(id_photo_buf, format="PNG")
         id_photo_data = id_photo_buf.getvalue()

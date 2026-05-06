@@ -21,6 +21,10 @@ def _make_png_bytes(width: int = 295, height: int = 413) -> bytes:
     return _make_image_bytes(width, height)
 
 
+def _make_pil_image(width: int = 295, height: int = 413) -> Image.Image:
+    return Image.new("RGBA", (width, height), color=(180, 160, 140, 255))
+
+
 SELECTED_SIZE = SIZE_OPTIONS_BY_ID["1-inch"]  # 25×35 mm
 
 
@@ -48,8 +52,10 @@ class TestProcessImagePreCropped:
         _mod = "src.services.image_processing_orchestrator"
 
         with (
-            patch(f"{_mod}.remove_background", return_value=_make_png_bytes()),
-            patch(f"{_mod}.generate_exact_crop", return_value=_make_png_bytes()),
+            patch(f"{_mod}.remove_background", return_value=_make_pil_image()),
+            patch(
+                f"{_mod}.generate_exact_crop_from_image", return_value=_make_pil_image()
+            ),
         ):
             result = process_image(
                 image_data=image_data,
@@ -71,8 +77,10 @@ class TestProcessImagePreCropped:
         _mod = "src.services.image_processing_orchestrator"
 
         with (
-            patch(f"{_mod}.remove_background", return_value=_make_png_bytes()),
-            patch(f"{_mod}.generate_exact_crop", return_value=_make_png_bytes()),
+            patch(f"{_mod}.remove_background", return_value=_make_pil_image()),
+            patch(
+                f"{_mod}.generate_exact_crop_from_image", return_value=_make_pil_image()
+            ),
         ):
             result = process_image(
                 image_data=image_data,

@@ -37,10 +37,8 @@ def validate_image_buffer(data: bytes, mime_type: str) -> ValidationResult:
 
     try:
         img = Image.open(BytesIO(data))
+        width, height = img.size  # read dimensions before verify closes the handle
         img.verify()
-        # Re-open after verify (verify closes the file)
-        img = Image.open(BytesIO(data))
-        width, height = img.size
         return ValidationResult(
             is_valid=True,
             file_size=len(data),

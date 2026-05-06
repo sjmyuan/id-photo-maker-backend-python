@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass
 
 from fastapi import FastAPI, File, Form, UploadFile
@@ -113,8 +114,6 @@ def create_app(models: Models) -> FastAPI:
         sizeId: str = Form(...),
         backgroundColor: str = Form(...),
     ) -> JSONResponse:
-        import re
-
         data = await image.read()
 
         if len(data) > config.MAX_UPLOAD_SIZE_BYTES:

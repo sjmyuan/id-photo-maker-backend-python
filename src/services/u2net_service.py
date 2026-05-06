@@ -1,3 +1,5 @@
+from PIL import Image
+from PIL.Image import Image as PILImage
 from rembg import new_session, remove
 
 from src import config
@@ -18,6 +20,11 @@ def load_u2net_model() -> U2NetModel:
     return U2NetModel(session)
 
 
-def remove_background(image_data: bytes, model: U2NetModel) -> bytes:
-    """Remove background from an image, returning a PNG with transparent background."""
-    return remove(image_data, session=model._session)  # type: ignore[arg-type]
+def remove_background(img: PILImage, model: U2NetModel) -> PILImage:
+    """Remove background, accepting and returning a PIL Image to avoid redundant
+    PNG encode/decode round-trips inside rembg.
+    """
+    result = remove(img, session=model._session)  # type: ignore[arg-type]
+    # rembg returns a PIL Image when given one; cast for type checker
+    assert isinstance(result, Image.Image)
+    return result
