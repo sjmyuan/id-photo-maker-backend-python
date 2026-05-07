@@ -7,6 +7,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libglib2.0-0 \
         libgl1 \
+        libgles2 \
         libsm6 \
         libxrender1 \
         libxext6 \
