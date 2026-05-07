@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libxrender1 \
         libxext6 \
         libgomp1 \
+        curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Use pip mirror (Aliyun) - swap to default PyPI if building outside China

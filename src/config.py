@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -12,6 +13,10 @@ def _parse_cors(raw: str | None) -> list[str] | str:
 
 
 PORT: int = int(os.getenv("PORT", "3000"))
+
+# Directory where AI model files (rembg ONNX + mediapipe tflite) are stored.
+# Defaults to ~/.u2net (same as rembg); overridden to /app/models in Docker via U2NET_HOME.
+MODELS_DIR: Path = Path(os.getenv("U2NET_HOME", str(Path.home() / ".u2net")))
 
 CORS_ORIGIN: list[str] | str = _parse_cors(os.getenv("CORS_ORIGIN"))
 

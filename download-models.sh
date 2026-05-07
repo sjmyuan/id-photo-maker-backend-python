@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Downloads AI model files required by the backend.
 # rembg caches models in ~/.u2net/ (overridable via U2NET_HOME).
-# MediaPipe models are bundled with the package and need no separate download.
+# MediaPipe face detector (blaze_face_short_range.tflite) is downloaded separately.
 # Run this once before starting the server to avoid download on first request.
 #
 # The model used is controlled by the BG_REMOVAL_MODEL env var (default: birefnet-portrait).
@@ -35,6 +35,19 @@ else:
     new_session(model)
     print(f"✓ {model} downloaded to {u2net_dir}")
 EOF
+
+# ── MediaPipe face detector model ────────────────────────────────────────────
+FACE_MODEL_FILE="$U2NET_DIR/blaze_face_short_range.tflite"
+FACE_MODEL_URL="https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/latest/blaze_face_short_range.tflite"
+
+if [ -f "$FACE_MODEL_FILE" ]; then
+    size_kb=$(du -k "$FACE_MODEL_FILE" | cut -f1)
+    echo "✓ blaze_face_short_range.tflite already cached (${size_kb} KB)"
+else
+    echo "Downloading blaze_face_short_range.tflite..."
+    curl -fsSL -o "$FACE_MODEL_FILE" "$FACE_MODEL_URL"
+    echo "✓ blaze_face_short_range.tflite downloaded to $U2NET_DIR"
+fi
 
 echo ""
 echo "All models ready. You can now run: python main.py"

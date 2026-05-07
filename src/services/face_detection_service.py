@@ -3,9 +3,14 @@ from io import BytesIO
 
 import mediapipe as mp
 import numpy as np
+from mediapipe.tasks import python as mp_tasks
+from mediapipe.tasks.python import vision as mp_vision
 from PIL import Image
 
+from src import config
 from src.utils.crop_area_calculation import FaceBox
+
+FACE_DETECTOR_MODEL_FILENAME = "blaze_face_short_range.tflite"
 
 
 @dataclass
@@ -21,9 +26,14 @@ class FaceDetectionResult:
 
 
 def load_face_detection_model() -> FaceDetectionModel:
-    """Load MediaPipe short-range face detection model."""
-    mp_face = mp.solutions.face_detection
-    detector = mp_face.FaceDetection(model_selection=0, min_detection_confidence=0.5)
+    """Load MediaPipe short-range face detection model via Tasks API."""
+    model_path = str(config.MODELS_DIR / FACE_DETECTOR_MODEL_FILENAME)
+    base_options = mp_tasks.BaseOptions(model_asset_path=model_path)
+    options = mp_vision.FaceDetectorOptions(
+        base_options=base_options,
+        min_detection_confidence=0.5,
+    )
+    detector = mp_vision.FaceDetector.create_from_options(options)
     return FaceDetectionModel(detector=detector)
 
 
@@ -35,23 +45,20 @@ def detect_faces_in_buffer(
     img_array = np.array(img)
     width, height = img.size
 
-    results = model.detector.process(img_array)  # type: ignore[attr-defined]
+    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img_array)
+    results = model.detector.detect(mp_image)  # type: ignore[attr-defined]
 
     if not results.detections:
         return FaceDetectionResult(faces=[], error="no-face-detected")
 
     faces: list[FaceBox] = []
     for detection in results.detections:
-        bbox = detection.location_data.relative_bounding_box
-        x = round(bbox.xmin * width)
-        y = round(bbox.ymin * height)
-        w = round(bbox.width * width)
-        h = round(bbox.height * height)
-        # Clamp to image bounds
-        x = max(0, x)
-        y = max(0, y)
-        w = min(w, width - x)
-        h = min(h, height - y)
+        # Tasks API returns absolute pixel coordinates
+        bbox = detection.bounding_box
+        x = max(0, bbox.origin_x)
+        y = max(0, bbox.origin_y)
+        w = min(bbox.width, width - x)
+        h = min(bbox.height, height - y)
         faces.append(FaceBox(x=x, y=y, width=w, height=h))
 
     error: str | None = None
