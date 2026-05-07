@@ -15,11 +15,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Use pip mirror (Aliyun) - swap to default PyPI if building outside China
-COPY pip.conf /etc/pip.conf
-
 COPY pyproject.toml ./
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir --timeout 600 --retries 5 --index-url https://pypi.org/simple/ .
 
 # ── Stage 2: final runtime image ──────────────────────────────────────────────
 FROM deps AS runtime
