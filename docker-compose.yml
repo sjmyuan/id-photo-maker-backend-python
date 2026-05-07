@@ -1,0 +1,17 @@
+services:
+  backend:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - models:/app/models
+    environment:
+      - BG_REMOVAL_MODEL=birefnet-portrait
+      - CORS_ORIGIN=
+    restart: unless-stopped
+
+volumes:
+  models:
+    # Named volume persists across container restarts.
+    # Models are downloaded on first start and reused on subsequent starts.
+    # To pre-populate: docker run --rm -v models:/app/models <image> ./download-models.sh

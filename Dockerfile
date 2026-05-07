@@ -19,21 +19,19 @@ COPY pip.conf /etc/pip.conf
 COPY pyproject.toml ./
 RUN pip install --no-cache-dir .
 
-# ── Stage 2: pre-load models ──────────────────────────────────────────────────
-FROM deps AS model-preload
+# ── Stage 2: final runtime image ──────────────────────────────────────────────
+FROM deps AS runtime
 
-# Store models inside the image so the container starts without network access
-ENV U2NET_HOME=/app/models
-
-COPY download-models.sh ./
-RUN chmod +x download-models.sh && \
-    PYTHON=python ./download-models.sh
-
-# ── Stage 3: final runtime image ──────────────────────────────────────────────
-FROM model-preload AS runtime
+COPY download-models.sh entrypoint.sh ./
+RUN chmod +x download-models.sh entrypoint.sh
 
 COPY src/ ./src/
 COPY main.py ./
+
+# Models are stored in a mounted volume, not baked into the image.
+# Mount a host directory or named volume at /app/models.
+# The entrypoint downloads missing models into the volume on first start.
+VOLUME /app/models
 
 EXPOSE 3000
 
@@ -43,4 +41,4 @@ ENV PORT=3000 \
     BG_REMOVAL_MODEL="birefnet-portrait" \
     U2NET_HOME=/app/models
 
-CMD ["python", "main.py"]
+ENTRYPOINT ["./entrypoint.sh"]
