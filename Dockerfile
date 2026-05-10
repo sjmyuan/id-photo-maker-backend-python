@@ -1,31 +1,5 @@
-# ── Stage 1: build — install Python deps into an isolated venv ───────────────
-FROM python:3.11-slim AS builder
-
-# binutils provides `strip` for removing debug symbols from .so files
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        binutils \
-    && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /build
-
-RUN python -m venv /venv
-ENV PATH="/venv/bin:$PATH"
-
-COPY pyproject.toml ./
-RUN pip install --no-cache-dir --timeout 600 --retries 5 \
-        --index-url https://pypi.org/simple/ . \
-    # Remove bytecode cache
-    && find /venv -name "*.pyc" -delete \
-    && find /venv -type d -name "__pycache__" -print0 | xargs -0 rm -rf \
-    # Remove test suites bundled inside packages
-    && find /venv -type d \( -name "tests" -o -name "test" \) -print0 | xargs -0 rm -rf \
-    # Remove type stubs (not needed at runtime)
-    && find /venv -name "*.pyi" -delete \
-    # Strip debug symbols from compiled extensions (~30-100 MB savings)
-    && find /venv -name "*.so" -print0 | xargs -0 strip --strip-unneeded 2>/dev/null || true
-
-# ── Stage 2: runtime — minimal image, no build tools ─────────────────────────
-FROM python:3.11-slim AS runtime
+# ── Stage 1: dependency install ──────────────────────────────────────────────
+FROM python:3.11-slim AS deps
 
 WORKDIR /app
 
@@ -43,9 +17,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy only the cleaned venv from the builder — no pip, no build artifacts
-COPY --from=builder /venv /venv
-ENV PATH="/venv/bin:$PATH"
+COPY pyproject.toml ./
+RUN pip install --no-cache-dir --timeout 600 --retries 5 --index-url https://pypi.org/simple/ .
+
+# ── Stage 2: final runtime image ──────────────────────────────────────────────
+FROM deps AS runtime
 
 COPY download-models.sh entrypoint.sh ./
 RUN chmod +x download-models.sh entrypoint.sh
