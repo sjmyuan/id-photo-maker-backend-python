@@ -8,8 +8,22 @@ from src.services.exact_crop_service import generate_exact_crop_from_image
 from src.services.image_validation import validate_image_buffer
 from src.services.u2net_service import U2NetModel, remove_background
 from src.types.index import SizeOption
-from src.utils.crop_area_calculation import CropArea
+from src.utils.crop_area_calculation import (
+    CropArea,
+    FaceBox,
+    calculate_initial_crop_area,
+)
 from src.utils.dpi_calculation import calculate_dpi
+
+
+@dataclass
+class NormalisedFace:
+    """Face bounding box with coordinates normalised to 0.0–1.0 relative to the image."""
+
+    x: float
+    y: float
+    width: float
+    height: float
 
 
 @dataclass
@@ -44,11 +58,14 @@ def process_image(
     background_color: str,
     u2net_model: U2NetModel,
     required_dpi: int = 300,
+    normalised_face: NormalisedFace | None = None,
 ) -> OrchestratorResult:
-    """Process a pre-cropped image: matting → exact resize → background → print layout.
+    """Process an image: (optional crop) → matting → exact resize → background.
 
-    The caller is responsible for sending an already-cropped face region.
-    Face detection and crop-area calculation are no longer performed here.
+    If ``normalised_face`` is supplied the image is first cropped to the face
+    region server-side (using the same algorithm as the client).  The web
+    frontend pre-crops client-side and omits this parameter; the miniprogram
+    sends the original full-resolution photo and relies on server-side cropping.
     """
     warnings: list[str] = []
 
@@ -79,9 +96,26 @@ def process_image(
                 f"{required_dpi} DPI. Output quality may be reduced."
             )
 
-        # Step 3: Decode the image once for inference. A second open is needed here
-        # because validate_image_buffer calls img.verify() which closes the handle.
+        # Step 3: Decode the image and apply the initial face crop if the
+        # caller supplied a normalised face bbox (miniprogram path).
         source_img = Image.open(BytesIO(image_data))
+
+        if normalised_face is not None:
+            face = FaceBox(
+                x=normalised_face.x * img_w,
+                y=normalised_face.y * img_h,
+                width=normalised_face.width * img_w,
+                height=normalised_face.height * img_h,
+            )
+            crop_area = calculate_initial_crop_area(
+                face, selected_size.aspect_ratio, img_w, img_h
+            )
+            left = max(0, round(crop_area.x))
+            top = max(0, round(crop_area.y))
+            right = min(img_w, round(crop_area.x + crop_area.width))
+            bottom = min(img_h, round(crop_area.y + crop_area.height))
+            source_img = source_img.crop((left, top, right, bottom))
+            img_w, img_h = source_img.size
 
         # Step 4: Background removal via rembg/U2Net.
         # Pass a PIL Image in and receive one back to avoid rembg's internal

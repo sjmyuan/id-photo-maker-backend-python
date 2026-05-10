@@ -5,7 +5,7 @@
 # Run this once before starting the server to avoid download on first request.
 #
 # The model used is controlled by the BG_REMOVAL_MODEL env var (default: birefnet-portrait).
-# Available models: birefnet-portrait, birefnet-general, u2net, u2net_human_seg, isnet-general-use
+# Available models: birefnet-portrait, birefnet-general-lite, birefnet-general, u2net, u2net_human_seg, isnet-general-use
 
 set -euo pipefail
 
@@ -45,7 +45,7 @@ if [ -f "$FACE_MODEL_FILE" ]; then
     echo "✓ blaze_face_short_range.tflite already cached (${size_kb} KB)"
 else
     echo "Downloading blaze_face_short_range.tflite..."
-    curl -fsSL -o "$FACE_MODEL_FILE" "$FACE_MODEL_URL"
+    curl -fsSL --max-time 3600 -o "$FACE_MODEL_FILE" "$FACE_MODEL_URL"
     echo "✓ blaze_face_short_range.tflite downloaded to $U2NET_DIR"
 fi
 

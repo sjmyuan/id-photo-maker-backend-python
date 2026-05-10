@@ -22,7 +22,7 @@ CORS_ORIGIN: list[str] | str = _parse_cors(os.getenv("CORS_ORIGIN"))
 
 # Background removal model name (any rembg-supported model name)
 # birefnet-portrait is recommended for ID photos; u2net is the smaller fallback
-BG_REMOVAL_MODEL: str = os.getenv("BG_REMOVAL_MODEL", "birefnet-portrait")
+BG_REMOVAL_MODEL: str = os.getenv("BG_REMOVAL_MODEL", "u2net_human_seg")
 
 # Soft threshold: images above this are scaled down before processing
 MAX_FILE_SIZE_BYTES: int = int(os.getenv("MAX_FILE_SIZE_MB", "10")) * 1024 * 1024
