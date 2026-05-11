@@ -179,7 +179,11 @@ def process_image(
             warnings=warnings,
         )
 
-    except Exception as exc:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         return OrchestratorResult(
-            errors=[ProcessingError(type="processing", message=str(exc))]
+            errors=[
+                ProcessingError(
+                    type="processing", message="An internal processing error occurred."
+                )
+            ]
         )

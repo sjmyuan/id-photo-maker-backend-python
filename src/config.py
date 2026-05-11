@@ -13,6 +13,7 @@ def _parse_cors(raw: str | None) -> list[str] | str:
 
 
 PORT: int = int(os.getenv("PORT", "3000"))
+HOST: str = os.getenv("HOST", "0.0.0.0")
 
 # Directory where AI model files (rembg ONNX + mediapipe tflite) are stored.
 # Defaults to ~/.u2net (same as rembg); overridden to /app/models in Docker via U2NET_HOME.

@@ -125,13 +125,9 @@ def detect_face_in_image(
 
     # Step 4: Normalise absolute pixel bbox → 0–1 range
     face_px = face_result.faces[0]
-    # The scaled-down image dimensions are used for the face bbox, but we need
-    # the original image dimensions to normalise for the full-resolution image.
-    # When scaling was applied, re-read the original image dimensions.
-    if validation.needs_scaling:
-        orig_w, orig_h = Image.open(BytesIO(image_data)).size
-    else:
-        orig_w, orig_h = img_w, img_h
+    # validation.dimensions holds the original (pre-scaling) image size — use it
+    # directly instead of re-opening the original buffer.
+    orig_w, orig_h = validation.dimensions
 
     # The face detector ran on the scaled buffer; scale the bbox back to
     # original image space before normalising.

@@ -47,7 +47,7 @@ def validate_image_buffer(data: bytes, mime_type: str) -> ValidationResult:
             dimensions=(width, height),
             warnings=warnings,
         )
-    except (UnidentifiedImageError, Exception):
+    except Exception:
         return ValidationResult(
             is_valid=False,
             file_size=len(data),

@@ -1,5 +1,3 @@
-from io import BytesIO
-
 from PIL import Image
 
 from src.utils.crop_area_calculation import CropArea
@@ -35,18 +33,3 @@ def generate_exact_crop_from_image(
 
     cropped = img.crop((left, top, right, bottom))
     return cropped.resize((target_w, target_h), Image.LANCZOS)
-
-
-def generate_exact_crop(
-    source_data: bytes,
-    crop_area: CropArea,
-    width_mm: float,
-    height_mm: float,
-    dpi: float,
-) -> bytes:
-    """Crop a region and resize to exact physical dimensions at the given DPI."""
-    img = Image.open(BytesIO(source_data))
-    resized = generate_exact_crop_from_image(img, crop_area, width_mm, height_mm, dpi)
-    buf = BytesIO()
-    resized.save(buf, format="PNG")
-    return buf.getvalue()

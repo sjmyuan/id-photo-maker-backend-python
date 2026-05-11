@@ -25,7 +25,7 @@ def main() -> None:
     print("Models loaded.")
 
     app = create_app(Models(u2net=u2net, face_detection=face_detection))
-    uvicorn.run(app, host="0.0.0.0", port=config.PORT)
+    uvicorn.run(app, host=config.HOST, port=config.PORT)
 
 
 if __name__ == "__main__":
