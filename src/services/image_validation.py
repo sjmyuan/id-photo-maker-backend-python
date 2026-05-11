@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from io import BytesIO
 
-from PIL import Image, UnidentifiedImageError
+from PIL import Image
 
 from src import config
 
