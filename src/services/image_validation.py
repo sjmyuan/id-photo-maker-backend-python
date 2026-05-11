@@ -3,8 +3,9 @@ from io import BytesIO
 
 from PIL import Image, UnidentifiedImageError
 
+from src import config
+
 VALID_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
 
 
 @dataclass
@@ -29,7 +30,7 @@ def validate_image_buffer(data: bytes, mime_type: str) -> ValidationResult:
         )
 
     warnings: list[str] = []
-    needs_scaling = len(data) > MAX_FILE_SIZE
+    needs_scaling = len(data) > config.MAX_FILE_SIZE_BYTES
     if needs_scaling:
         warnings.append(
             "File size exceeds 10 MB. Image will be automatically scaled down."

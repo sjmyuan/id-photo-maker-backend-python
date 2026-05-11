@@ -9,6 +9,12 @@ from src.services.face_detection_service import (
 )
 from src.services.image_scaling import scale_image_to_target
 from src.services.image_validation import validate_image_buffer
+from src.types.index import SizeOption
+from src.utils.crop_area_calculation import (
+    FaceBox,
+    calculate_initial_crop_area,
+)
+from src.utils.dpi_calculation import calculate_dpi
 
 
 @dataclass
@@ -28,18 +34,47 @@ class NormalisedFaceBox:
 
 
 @dataclass
+class NormalisedCropArea:
+    """Crop area with coordinates normalised to 0.0–1.0 relative to the image."""
+
+    x: float
+    y: float
+    width: float
+    height: float
+
+
+@dataclass
+class DPICheck:
+    """Result of a DPI sufficiency check for the computed crop area."""
+
+    dpi: float
+    sufficient: bool
+
+
+@dataclass
 class DetectFaceResult:
     face: NormalisedFaceBox | None = None
+    crop_area: NormalisedCropArea | None = None
+    dpi_check: DPICheck | None = None
     errors: list[DetectFaceError] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+
+
+_REQUIRED_DPI = 300
 
 
 def detect_face_in_image(
     image_data: bytes,
     mime_type: str,
     face_detection_model: FaceDetectionModel,
+    *,
+    size_option: SizeOption | None = None,
 ) -> DetectFaceResult:
-    """Validate image, run face detection, and return a normalised face bounding box (0–1)."""
+    """Validate image, run face detection, and return a normalised face bounding box (0–1).
+
+    When ``size_option`` is provided the function additionally computes the
+    crop area (normalised 0–1) for that photo size and performs a DPI check.
+    """
     warnings: list[str] = []
 
     # Step 1: Validate
@@ -52,14 +87,17 @@ def detect_face_in_image(
         )
     warnings.extend(validation.warnings)
 
-    # Step 2: Scale down if needed (face detection does not require full resolution)
-    buf = scale_image_to_target(image_data) if validation.needs_scaling else image_data
+    # Step 2: Scale down if needed (face detection does not require full resolution).
+    # When no scaling is required the image dimensions are already known from
+    # validation, avoiding a redundant Image.open call just to read the size.
+    if validation.needs_scaling:
+        buf = scale_image_to_target(image_data)
+        img_w, img_h = Image.open(BytesIO(buf)).size
+    else:
+        buf = image_data
+        img_w, img_h = validation.dimensions
 
-    # Step 3: Determine image dimensions for normalisation
-    img = Image.open(BytesIO(buf))
-    img_w, img_h = img.size
-
-    # Step 4: Face detection
+    # Step 3: Face detection
     face_result = detect_faces_in_buffer(face_detection_model, buf)
 
     if len(face_result.faces) == 0:
@@ -85,16 +123,61 @@ def detect_face_in_image(
             warnings=warnings,
         )
 
-    # Step 5: Normalise absolute pixel bbox → 0–1 range
+    # Step 4: Normalise absolute pixel bbox → 0–1 range
     face_px = face_result.faces[0]
+    # The scaled-down image dimensions are used for the face bbox, but we need
+    # the original image dimensions to normalise for the full-resolution image.
+    # When scaling was applied, re-read the original image dimensions.
+    if validation.needs_scaling:
+        orig_w, orig_h = Image.open(BytesIO(image_data)).size
+    else:
+        orig_w, orig_h = img_w, img_h
+
+    # The face detector ran on the scaled buffer; scale the bbox back to
+    # original image space before normalising.
+    scale_x = orig_w / img_w
+    scale_y = orig_h / img_h
     normalised = NormalisedFaceBox(
-        x=face_px.x / img_w,
-        y=face_px.y / img_h,
-        width=face_px.width / img_w,
-        height=face_px.height / img_h,
+        x=(face_px.x * scale_x) / orig_w,
+        y=(face_px.y * scale_y) / orig_h,
+        width=(face_px.width * scale_x) / orig_w,
+        height=(face_px.height * scale_y) / orig_h,
     )
+
+    # Step 5 (optional): Compute crop area + DPI check when a size is requested.
+    crop_area: NormalisedCropArea | None = None
+    dpi_check: DPICheck | None = None
+
+    if size_option is not None:
+        face_abs = FaceBox(
+            x=normalised.x * orig_w,
+            y=normalised.y * orig_h,
+            width=normalised.width * orig_w,
+            height=normalised.height * orig_h,
+        )
+        ca_px = calculate_initial_crop_area(
+            face_abs, size_option.aspect_ratio, orig_w, orig_h
+        )
+        crop_area = NormalisedCropArea(
+            x=ca_px.x / orig_w,
+            y=ca_px.y / orig_h,
+            width=ca_px.width / orig_w,
+            height=ca_px.height / orig_h,
+        )
+
+        dpi_result = calculate_dpi(
+            ca_px.width,
+            ca_px.height,
+            size_option.physical_width,
+            size_option.physical_height,
+        )
+        dpi_check = DPICheck(
+            dpi=dpi_result.min_dpi, sufficient=dpi_result.min_dpi >= _REQUIRED_DPI
+        )
 
     return DetectFaceResult(
         face=normalised,
+        crop_area=crop_area,
+        dpi_check=dpi_check,
         warnings=warnings,
     )

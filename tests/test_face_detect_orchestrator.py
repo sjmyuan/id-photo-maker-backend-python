@@ -6,9 +6,11 @@ from unittest.mock import MagicMock, patch
 from PIL import Image
 
 from src.services.face_detect_orchestrator import (
+    NormalisedCropArea,
     NormalisedFaceBox,
     detect_face_in_image,
 )
+from src.types.index import SIZE_OPTIONS_BY_ID
 from src.utils.crop_area_calculation import FaceBox
 
 
@@ -125,3 +127,156 @@ class TestDetectFaceInImage:
         # image_width / image_height fields should be gone from the result
         assert not hasattr(result, "image_width")
         assert not hasattr(result, "image_height")
+
+
+class TestDetectFaceInImageWithSizeOption:
+    """When size_option is supplied, detect_face_in_image also returns crop_area + dpi_check."""
+
+    def test_crop_area_is_none_without_size_option(self) -> None:
+        image_data = _make_image_bytes(400, 600)
+        model = _make_mock_face_detection_model()
+        face_px = FaceBox(x=100, y=150, width=80, height=100)
+
+        with patch(
+            "src.services.face_detect_orchestrator.detect_faces_in_buffer",
+            return_value=MagicMock(faces=[face_px]),
+        ):
+            result = detect_face_in_image(image_data, "image/jpeg", model)
+
+        assert result.crop_area is None
+        assert result.dpi_check is None
+
+    def test_crop_area_returned_when_size_option_provided(self) -> None:
+        image_data = _make_image_bytes(400, 600)
+        model = _make_mock_face_detection_model()
+        face_px = FaceBox(x=100, y=150, width=80, height=100)
+        size = SIZE_OPTIONS_BY_ID["1-inch"]  # 25×35mm, ratio 25/35
+
+        with patch(
+            "src.services.face_detect_orchestrator.detect_faces_in_buffer",
+            return_value=MagicMock(faces=[face_px]),
+        ):
+            result = detect_face_in_image(
+                image_data, "image/jpeg", model, size_option=size
+            )
+
+        assert result.errors == []
+        assert result.crop_area is not None
+        assert isinstance(result.crop_area, NormalisedCropArea)
+
+    def test_crop_area_values_in_0_to_1_range(self) -> None:
+        image_data = _make_image_bytes(400, 600)
+        model = _make_mock_face_detection_model()
+        face_px = FaceBox(x=100, y=150, width=80, height=100)
+        size = SIZE_OPTIONS_BY_ID["1-inch"]
+
+        with patch(
+            "src.services.face_detect_orchestrator.detect_faces_in_buffer",
+            return_value=MagicMock(faces=[face_px]),
+        ):
+            result = detect_face_in_image(
+                image_data, "image/jpeg", model, size_option=size
+            )
+
+        ca = result.crop_area
+        assert ca is not None
+        assert 0.0 <= ca.x <= 1.0
+        assert 0.0 <= ca.y <= 1.0
+        assert 0.0 < ca.width <= 1.0
+        assert 0.0 < ca.height <= 1.0
+
+    def test_crop_area_aspect_ratio_matches_size(self) -> None:
+        image_data = _make_image_bytes(400, 600)
+        model = _make_mock_face_detection_model()
+        # Centred face so clamping won't distort the ratio
+        face_px = FaceBox(x=150, y=250, width=100, height=120)
+        size = SIZE_OPTIONS_BY_ID["1-inch"]  # ratio = 25/35
+
+        with patch(
+            "src.services.face_detect_orchestrator.detect_faces_in_buffer",
+            return_value=MagicMock(faces=[face_px]),
+        ):
+            result = detect_face_in_image(
+                image_data, "image/jpeg", model, size_option=size
+            )
+
+        ca = result.crop_area
+        assert ca is not None
+        # Compute pixel ratio: (ca.width * img_w) / (ca.height * img_h)
+        pixel_w = ca.width * 400
+        pixel_h = ca.height * 600
+        assert abs(pixel_w / pixel_h - size.aspect_ratio) < 1e-4
+
+    def test_dpi_check_returned_when_size_option_provided(self) -> None:
+        image_data = _make_image_bytes(400, 600)
+        model = _make_mock_face_detection_model()
+        face_px = FaceBox(x=100, y=150, width=80, height=100)
+        size = SIZE_OPTIONS_BY_ID["1-inch"]
+
+        with patch(
+            "src.services.face_detect_orchestrator.detect_faces_in_buffer",
+            return_value=MagicMock(faces=[face_px]),
+        ):
+            result = detect_face_in_image(
+                image_data, "image/jpeg", model, size_option=size
+            )
+
+        assert result.dpi_check is not None
+        assert hasattr(result.dpi_check, "dpi")
+        assert hasattr(result.dpi_check, "sufficient")
+        assert isinstance(result.dpi_check.dpi, float)
+        assert isinstance(result.dpi_check.sufficient, bool)
+
+    def test_dpi_check_sufficient_for_high_res_image(self) -> None:
+        # 1200×1800 image, 1-inch (25×35mm) → ~1219 DPI → sufficient
+        image_data = _make_image_bytes(1200, 1800)
+        model = _make_mock_face_detection_model()
+        # Large face centred so crop stays large
+        face_px = FaceBox(x=400, y=600, width=400, height=500)
+        size = SIZE_OPTIONS_BY_ID["1-inch"]
+
+        with patch(
+            "src.services.face_detect_orchestrator.detect_faces_in_buffer",
+            return_value=MagicMock(faces=[face_px]),
+        ):
+            result = detect_face_in_image(
+                image_data, "image/jpeg", model, size_option=size
+            )
+
+        assert result.dpi_check is not None
+        assert result.dpi_check.sufficient is True
+
+    def test_dpi_check_insufficient_for_tiny_image(self) -> None:
+        # 60×90 image, 1-inch (25×35mm) → ~61 DPI → insufficient (< 300)
+        image_data = _make_image_bytes(60, 90)
+        model = _make_mock_face_detection_model()
+        face_px = FaceBox(x=10, y=20, width=30, height=40)
+        size = SIZE_OPTIONS_BY_ID["1-inch"]
+
+        with patch(
+            "src.services.face_detect_orchestrator.detect_faces_in_buffer",
+            return_value=MagicMock(faces=[face_px]),
+        ):
+            result = detect_face_in_image(
+                image_data, "image/jpeg", model, size_option=size
+            )
+
+        assert result.dpi_check is not None
+        assert result.dpi_check.sufficient is False
+
+    def test_no_crop_area_on_face_detection_error(self) -> None:
+        image_data = _make_image_bytes(400, 600)
+        model = _make_mock_face_detection_model()
+        size = SIZE_OPTIONS_BY_ID["1-inch"]
+
+        with patch(
+            "src.services.face_detect_orchestrator.detect_faces_in_buffer",
+            return_value=MagicMock(faces=[]),
+        ):
+            result = detect_face_in_image(
+                image_data, "image/jpeg", model, size_option=size
+            )
+
+        assert result.face is None
+        assert result.crop_area is None
+        assert result.dpi_check is None

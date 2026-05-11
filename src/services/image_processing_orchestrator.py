@@ -27,6 +27,16 @@ class NormalisedFace:
 
 
 @dataclass
+class NormalisedCropArea:
+    """Pre-computed crop area with coordinates normalised to 0.0–1.0 relative to the image."""
+
+    x: float
+    y: float
+    width: float
+    height: float
+
+
+@dataclass
 class ProcessingError:
     type: str  # "validation" | "matting" | "processing"
     message: str
@@ -59,13 +69,15 @@ def process_image(
     u2net_model: U2NetModel,
     required_dpi: int = 300,
     normalised_face: NormalisedFace | None = None,
+    normalised_crop_area: NormalisedCropArea | None = None,
 ) -> OrchestratorResult:
     """Process an image: (optional crop) → matting → exact resize → background.
 
-    If ``normalised_face`` is supplied the image is first cropped to the face
-    region server-side (using the same algorithm as the client).  The web
-    frontend pre-crops client-side and omits this parameter; the miniprogram
-    sends the original full-resolution photo and relies on server-side cropping.
+    Crop priority (highest to lowest):
+    1. ``normalised_crop_area``: pre-computed crop from /api/detect — used directly,
+       skipping ``calculate_initial_crop_area``.
+    2. ``normalised_face``: face bbox; crop area is computed server-side.
+    3. No crop info: image is used as-is.
     """
     warnings: list[str] = []
 
@@ -80,27 +92,27 @@ def process_image(
                 ]
             )
 
-        # Step 2: Defence-in-depth DPI check — warn if the crop is too low-res,
-        # but do not block processing (the frontend already validated this).
+        # Step 2: Decode the image and apply the initial face crop.
         img_w, img_h = validation.dimensions
-        dpi_result = calculate_dpi(
-            img_w,
-            img_h,
-            selected_size.physical_width,
-            selected_size.physical_height,
-        )
-        if dpi_result.min_dpi < required_dpi:
-            calc_dpi = round(dpi_result.min_dpi)
-            warnings.append(
-                f"Image resolution ({calc_dpi} DPI) is below the recommended "
-                f"{required_dpi} DPI. Output quality may be reduced."
-            )
-
-        # Step 3: Decode the image and apply the initial face crop if the
-        # caller supplied a normalised face bbox (miniprogram path).
         source_img = Image.open(BytesIO(image_data))
 
-        if normalised_face is not None:
+        if normalised_crop_area is not None:
+            # Fast path: pre-computed crop area — convert to pixels and crop directly.
+            left = max(0, round(normalised_crop_area.x * img_w))
+            top = max(0, round(normalised_crop_area.y * img_h))
+            right = min(
+                img_w,
+                round((normalised_crop_area.x + normalised_crop_area.width) * img_w),
+            )
+            bottom = min(
+                img_h,
+                round((normalised_crop_area.y + normalised_crop_area.height) * img_h),
+            )
+            source_img = source_img.crop((left, top, right, bottom))
+            img_w, img_h = source_img.size
+
+        elif normalised_face is not None:
+            # Legacy path: compute crop area from face bbox server-side.
             face = FaceBox(
                 x=normalised_face.x * img_w,
                 y=normalised_face.y * img_h,
@@ -116,6 +128,22 @@ def process_image(
             bottom = min(img_h, round(crop_area.y + crop_area.height))
             source_img = source_img.crop((left, top, right, bottom))
             img_w, img_h = source_img.size
+
+        # Step 3: Defence-in-depth DPI check on the actual crop dimensions.
+        # Warn if the output will be below the required DPI, but do not block
+        # processing (the frontend already validated this).
+        dpi_result = calculate_dpi(
+            img_w,
+            img_h,
+            selected_size.physical_width,
+            selected_size.physical_height,
+        )
+        if dpi_result.min_dpi < required_dpi:
+            calc_dpi = round(dpi_result.min_dpi)
+            warnings.append(
+                f"Image resolution ({calc_dpi} DPI) is below the recommended "
+                f"{required_dpi} DPI. Output quality may be reduced."
+            )
 
         # Step 4: Background removal via rembg/U2Net.
         # Pass a PIL Image in and receive one back to avoid rembg's internal
@@ -139,7 +167,9 @@ def process_image(
         )
         composite = Image.alpha_composite(bg, exact_rgba).convert("RGB")
         id_photo_buf = BytesIO()
-        composite.save(id_photo_buf, format="PNG")
+        composite.save(
+            id_photo_buf, format="JPEG", quality=95, dpi=(required_dpi, required_dpi)
+        )
         id_photo_data = id_photo_buf.getvalue()
 
         return OrchestratorResult(
@@ -149,8 +179,7 @@ def process_image(
             warnings=warnings,
         )
 
-    except Exception as e:
+    except Exception as exc:  # noqa: BLE001
         return OrchestratorResult(
-            errors=[ProcessingError(type="processing", message=str(e))],
-            warnings=warnings,
+            errors=[ProcessingError(type="processing", message=str(exc))]
         )

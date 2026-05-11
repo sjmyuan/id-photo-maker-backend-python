@@ -22,7 +22,6 @@ class FaceDetectionModel:
 @dataclass
 class FaceDetectionResult:
     faces: list[FaceBox]
-    error: str | None = None
 
 
 def load_face_detection_model() -> FaceDetectionModel:
@@ -49,7 +48,7 @@ def detect_faces_in_buffer(
     results = model.detector.detect(mp_image)  # type: ignore[attr-defined]
 
     if not results.detections:
-        return FaceDetectionResult(faces=[], error="no-face-detected")
+        return FaceDetectionResult(faces=[])
 
     faces: list[FaceBox] = []
     for detection in results.detections:
@@ -61,8 +60,4 @@ def detect_faces_in_buffer(
         h = min(bbox.height, height - y)
         faces.append(FaceBox(x=x, y=y, width=w, height=h))
 
-    error: str | None = None
-    if len(faces) > 1:
-        error = "multiple-faces-detected"
-
-    return FaceDetectionResult(faces=faces, error=error)
+    return FaceDetectionResult(faces=faces)

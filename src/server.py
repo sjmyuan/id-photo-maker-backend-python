@@ -1,3 +1,4 @@
+import base64
 import re
 from dataclasses import dataclass
 
@@ -8,10 +9,14 @@ from fastapi.responses import JSONResponse
 from src import config
 from src.services.face_detect_orchestrator import detect_face_in_image
 from src.services.face_detection_service import FaceDetectionModel
-from src.services.image_processing_orchestrator import NormalisedFace, process_image
+from src.services.image_processing_orchestrator import (
+    NormalisedCropArea,
+    NormalisedFace,
+    process_image,
+)
 from src.services.print_layout_service import generate_print_layout
 from src.services.u2net_service import U2NetModel
-from src.types.index import SIZE_OPTIONS_BY_ID
+from src.types.index import BG_COLOR_OPTIONS, SIZE_OPTIONS, SIZE_OPTIONS_BY_ID
 from src.utils.layout_calculation import PhotoSize
 
 ALLOWED_PAPER_TYPES = {"6-inch", "a4"}
@@ -41,10 +46,37 @@ def create_app(models: Models) -> FastAPI:
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    # ── GET /api/options ─────────────────────────────────────────────────────
+
+    @app.get("/api/options")
+    async def options() -> JSONResponse:
+        return JSONResponse(
+            content={
+                "sizes": [
+                    {
+                        "id": s.id,
+                        "label": s.label,
+                        "labelZh": s.label_zh,
+                        "dims": s.dimensions,
+                        "widthMm": s.physical_width,
+                        "heightMm": s.physical_height,
+                        "aspectRatio": s.physical_width / s.physical_height,
+                    }
+                    for s in SIZE_OPTIONS
+                ],
+                "colors": [
+                    {"label": c.label, "value": c.value} for c in BG_COLOR_OPTIONS
+                ],
+            }
+        )
+
     # ── POST /api/detect ──────────────────────────────────────────────────────
 
     @app.post("/api/detect")
-    async def detect(image: UploadFile = File(...)) -> JSONResponse:
+    async def detect(
+        image: UploadFile = File(...),
+        sizeId: str | None = Form(default=None),
+    ) -> JSONResponse:
         data = await image.read()
 
         max_mb = config.MAX_UPLOAD_SIZE_BYTES // (1024 * 1024)
@@ -81,7 +113,27 @@ def create_app(models: Models) -> FastAPI:
                 },
             )
 
-        result = detect_face_in_image(data, mime, models.face_detection)
+        # Validate sizeId when provided
+        size_option = None
+        if sizeId is not None:
+            size_option = SIZE_OPTIONS_BY_ID.get(sizeId)
+            if size_option is None:
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        "success": False,
+                        "errors": [
+                            {
+                                "type": "validation",
+                                "message": f"Invalid sizeId: {sizeId}",
+                            }
+                        ],
+                    },
+                )
+
+        result = detect_face_in_image(
+            data, mime, models.face_detection, size_option=size_option
+        )
 
         if result.errors:
             has_face_error = any(e.type == "face-detection" for e in result.errors)
@@ -96,16 +148,53 @@ def create_app(models: Models) -> FastAPI:
                 },
             )
 
+        if result.dpi_check is not None and not result.dpi_check.sufficient:
+            calc_dpi = round(result.dpi_check.dpi)
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "success": False,
+                    "errors": [
+                        {
+                            "type": "low-dpi",
+                            "message": (
+                                f"Image resolution is too low (approx. {calc_dpi} DPI). "
+                                "Please upload a higher-resolution photo (at least 300 DPI)."
+                            ),
+                        }
+                    ],
+                },
+            )
+
         face = result.face
         face_dict = (
             {"x": face.x, "y": face.y, "width": face.width, "height": face.height}
             if face
             else None
         )
+        crop_area = result.crop_area
+        crop_area_dict = (
+            {
+                "x": crop_area.x,
+                "y": crop_area.y,
+                "width": crop_area.width,
+                "height": crop_area.height,
+            }
+            if crop_area
+            else None
+        )
+        dpi_check = result.dpi_check
+        dpi_check_dict = (
+            {"dpi": dpi_check.dpi, "sufficient": dpi_check.sufficient}
+            if dpi_check
+            else None
+        )
         return JSONResponse(
             content={
                 "success": True,
                 "face": face_dict,
+                "cropArea": crop_area_dict,
+                "dpiCheck": dpi_check_dict,
                 "warnings": result.warnings,
             }
         )
@@ -121,6 +210,10 @@ def create_app(models: Models) -> FastAPI:
         faceY: float | None = Form(default=None),
         faceW: float | None = Form(default=None),
         faceH: float | None = Form(default=None),
+        cropX: float | None = Form(default=None),
+        cropY: float | None = Form(default=None),
+        cropW: float | None = Form(default=None),
+        cropH: float | None = Form(default=None),
     ) -> JSONResponse:
         data = await image.read()
 
@@ -190,15 +283,115 @@ def create_app(models: Models) -> FastAPI:
                 },
             )
 
+        # Validate that face fields are either all present or all absent.
+        # Partial fields (e.g. due to a client bug) are rejected rather than
+        # silently ignored, which would produce an uncropped output.
+        face_fields = {"faceX": faceX, "faceY": faceY, "faceW": faceW, "faceH": faceH}
+        provided = [k for k, v in face_fields.items() if v is not None]
+        if 0 < len(provided) < 4:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "success": False,
+                    "errors": [
+                        {
+                            "type": "validation",
+                            "message": f"Partial face fields supplied ({', '.join(provided)}). "
+                            "Either supply all four (faceX, faceY, faceW, faceH) or none.",
+                        }
+                    ],
+                },
+            )
+
         normalised_face: NormalisedFace | None = None
-        if (
-            faceX is not None
-            and faceY is not None
-            and faceW is not None
-            and faceH is not None
-        ):
+        if len(provided) == 4:
+            # Validate that all coordinates are within the normalised 0–1 range.
+            if not (0.0 <= faceX <= 1.0 and 0.0 <= faceY <= 1.0):  # type: ignore[operator]
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        "success": False,
+                        "errors": [
+                            {
+                                "type": "validation",
+                                "message": "faceX and faceY must be in the range [0, 1].",
+                            }
+                        ],
+                    },
+                )
+            if not (0.0 < faceW <= 1.0 and 0.0 < faceH <= 1.0):  # type: ignore[operator]
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        "success": False,
+                        "errors": [
+                            {
+                                "type": "validation",
+                                "message": "faceW and faceH must be in the range (0, 1].",
+                            }
+                        ],
+                    },
+                )
             normalised_face = NormalisedFace(
-                x=faceX, y=faceY, width=faceW, height=faceH
+                x=faceX,  # type: ignore[arg-type]
+                y=faceY,  # type: ignore[arg-type]
+                width=faceW,  # type: ignore[arg-type]
+                height=faceH,  # type: ignore[arg-type]
+            )
+
+        # Validate crop area fields (all or none; takes priority over face fields).
+        crop_fields = {"cropX": cropX, "cropY": cropY, "cropW": cropW, "cropH": cropH}
+        provided_crop = [k for k, v in crop_fields.items() if v is not None]
+        if 0 < len(provided_crop) < 4:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "success": False,
+                    "errors": [
+                        {
+                            "type": "validation",
+                            "message": (
+                                f"Partial crop fields supplied ({', '.join(provided_crop)}). "
+                                "Either supply all four (cropX, cropY, cropW, cropH) or none."
+                            ),
+                        }
+                    ],
+                },
+            )
+
+        normalised_crop_area: NormalisedCropArea | None = None
+        if len(provided_crop) == 4:
+            if not (0.0 <= cropX <= 1.0 and 0.0 <= cropY <= 1.0):  # type: ignore[operator]
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        "success": False,
+                        "errors": [
+                            {
+                                "type": "validation",
+                                "message": "cropX and cropY must be in the range [0, 1].",
+                            }
+                        ],
+                    },
+                )
+            if not (0.0 < cropW <= 1.0 and 0.0 < cropH <= 1.0):  # type: ignore[operator]
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        "success": False,
+                        "errors": [
+                            {
+                                "type": "validation",
+                                "message": "cropW and cropH must be in the range (0, 1].",
+                            }
+                        ],
+                    },
+                )
+            normalised_crop_area = NormalisedCropArea(
+                x=cropX,  # type: ignore[arg-type]
+                y=cropY,  # type: ignore[arg-type]
+                width=cropW,  # type: ignore[arg-type]
+                height=cropH,  # type: ignore[arg-type]
             )
 
         orch_result = process_image(
@@ -208,6 +401,7 @@ def create_app(models: Models) -> FastAPI:
             background_color=backgroundColor,
             u2net_model=models.u2net,
             normalised_face=normalised_face,
+            normalised_crop_area=normalised_crop_area,
         )
 
         if orch_result.errors:
@@ -223,7 +417,19 @@ def create_app(models: Models) -> FastAPI:
             )
 
         r = orch_result.result
-        assert r is not None
+        if r is None:
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "success": False,
+                    "errors": [
+                        {
+                            "type": "processing",
+                            "message": "An unexpected error occurred.",
+                        }
+                    ],
+                },
+            )
         return JSONResponse(
             content={
                 "success": True,
@@ -321,8 +527,6 @@ def create_app(models: Models) -> FastAPI:
                     ],
                 },
             )
-
-        import base64
 
         return JSONResponse(
             content={

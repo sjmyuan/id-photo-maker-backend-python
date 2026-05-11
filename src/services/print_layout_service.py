@@ -58,5 +58,5 @@ def generate_print_layout(
             canvas.paste(resized_photo, (x, y))
 
     buf = BytesIO()
-    canvas.save(buf, format="PNG")
+    canvas.save(buf, format="JPEG", quality=95, dpi=(dpi, dpi))
     return buf.getvalue()

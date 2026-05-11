@@ -26,5 +26,6 @@ def remove_background(img: PILImage, model: U2NetModel) -> PILImage:
     """
     result = remove(img, session=model._session)
     # rembg returns a PIL Image when given one; cast for type checker
-    assert isinstance(result, Image.Image)
+    if not isinstance(result, Image.Image):
+        raise TypeError(f"rembg returned unexpected type: {type(result)}")
     return result
