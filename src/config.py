@@ -30,3 +30,6 @@ MAX_FILE_SIZE_BYTES: int = int(os.getenv("MAX_FILE_SIZE_MB", "10")) * 1024 * 102
 
 # Hard upload limit: requests larger than this are rejected with 413
 MAX_UPLOAD_SIZE_BYTES: int = int(os.getenv("MAX_UPLOAD_SIZE_MB", "50")) * 1024 * 1024
+
+# Minimum acceptable print resolution; used for DPI checks and processing defaults
+REQUIRED_DPI: int = int(os.getenv("REQUIRED_DPI", "300"))

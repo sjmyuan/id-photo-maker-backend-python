@@ -26,10 +26,11 @@ def generate_exact_crop_from_image(
     """
     target_w, target_h = _target_pixel_dimensions(width_mm, height_mm, dpi)
 
+    img_w, img_h = img.size
     left = max(0, round(crop_area.x))
     top = max(0, round(crop_area.y))
-    right = left + round(crop_area.width)
-    bottom = top + round(crop_area.height)
+    right = min(img_w, left + round(crop_area.width))
+    bottom = min(img_h, top + round(crop_area.height))
 
     cropped = img.crop((left, top, right, bottom))
     return cropped.resize((target_w, target_h), Image.LANCZOS)

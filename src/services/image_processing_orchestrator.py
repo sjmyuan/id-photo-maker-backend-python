@@ -1,9 +1,12 @@
 import base64
+import sys
+import traceback
 from dataclasses import dataclass, field
 from io import BytesIO
 
 from PIL import Image
 
+from src import config
 from src.services.exact_crop_service import generate_exact_crop_from_image
 from src.services.image_validation import validate_image_buffer
 from src.services.u2net_service import U2NetModel, remove_background
@@ -67,7 +70,7 @@ def process_image(
     selected_size: SizeOption,
     background_color: str,
     u2net_model: U2NetModel,
-    required_dpi: int = 300,
+    required_dpi: int = config.REQUIRED_DPI,
     normalised_face: NormalisedFace | None = None,
     normalised_crop_area: NormalisedCropArea | None = None,
 ) -> OrchestratorResult:
@@ -180,6 +183,7 @@ def process_image(
         )
 
     except Exception:  # noqa: BLE001
+        traceback.print_exc(file=sys.stderr)
         return OrchestratorResult(
             errors=[
                 ProcessingError(

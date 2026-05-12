@@ -1,8 +1,6 @@
 from dataclasses import dataclass, field
-from io import BytesIO
 
-from PIL import Image
-
+from src import config
 from src.services.face_detection_service import (
     FaceDetectionModel,
     detect_faces_in_buffer,
@@ -11,6 +9,7 @@ from src.services.image_scaling import scale_image_to_target
 from src.services.image_validation import validate_image_buffer
 from src.types.index import SizeOption
 from src.utils.crop_area_calculation import (
+    CONSTRAINTS_BY_SIZE,
     FaceBox,
     calculate_initial_crop_area,
 )
@@ -60,9 +59,6 @@ class DetectFaceResult:
     warnings: list[str] = field(default_factory=list)
 
 
-_REQUIRED_DPI = 300
-
-
 def detect_face_in_image(
     image_data: bytes,
     mime_type: str,
@@ -91,8 +87,7 @@ def detect_face_in_image(
     # When no scaling is required the image dimensions are already known from
     # validation, avoiding a redundant Image.open call just to read the size.
     if validation.needs_scaling:
-        buf = scale_image_to_target(image_data)
-        img_w, img_h = Image.open(BytesIO(buf)).size
+        buf, (img_w, img_h) = scale_image_to_target(image_data)
     else:
         buf = image_data
         img_w, img_h = validation.dimensions
@@ -152,7 +147,11 @@ def detect_face_in_image(
             height=normalised.height * orig_h,
         )
         ca_px = calculate_initial_crop_area(
-            face_abs, size_option.aspect_ratio, orig_w, orig_h
+            face_abs,
+            size_option.aspect_ratio,
+            orig_w,
+            orig_h,
+            constraints=CONSTRAINTS_BY_SIZE.get(size_option.id),
         )
         crop_area = NormalisedCropArea(
             x=ca_px.x / orig_w,
@@ -168,7 +167,7 @@ def detect_face_in_image(
             size_option.physical_height,
         )
         dpi_check = DPICheck(
-            dpi=dpi_result.min_dpi, sufficient=dpi_result.min_dpi >= _REQUIRED_DPI
+            dpi=dpi_result.min_dpi, sufficient=dpi_result.min_dpi >= config.REQUIRED_DPI
         )
 
     return DetectFaceResult(

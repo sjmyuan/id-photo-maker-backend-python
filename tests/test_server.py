@@ -283,3 +283,117 @@ class TestProcessWithCropArea:
 
         assert res.status_code == 400
         assert res.json()["success"] is False
+
+
+# ── POST /api/layout ──────────────────────────────────────────────────────────
+
+
+class TestLayout:
+    """Tests for the /api/layout endpoint."""
+
+    def test_6inch_returns_200_with_print_layout(self, client: TestClient) -> None:
+        image_bytes = _make_jpeg_bytes()
+
+        with patch(
+            "src.server.generate_print_layout",
+            return_value=image_bytes,
+        ):
+            res = client.post(
+                "/api/layout",
+                files={"image": ("photo.jpg", image_bytes, "image/jpeg")},
+                data={"sizeId": "1-inch", "paperType": "6-inch"},
+            )
+
+        assert res.status_code == 200
+        data = res.json()
+        assert data["success"] is True
+        assert "printLayout" in data
+        assert len(data["printLayout"]) > 0
+
+    def test_a4_returns_200_with_print_layout(self, client: TestClient) -> None:
+        image_bytes = _make_jpeg_bytes()
+
+        with patch(
+            "src.server.generate_print_layout",
+            return_value=image_bytes,
+        ):
+            res = client.post(
+                "/api/layout",
+                files={"image": ("photo.jpg", image_bytes, "image/jpeg")},
+                data={"sizeId": "1-inch", "paperType": "a4"},
+            )
+
+        assert res.status_code == 200
+        assert res.json()["success"] is True
+
+    def test_invalid_paper_type_returns_400(self, client: TestClient) -> None:
+        image_bytes = _make_jpeg_bytes()
+
+        res = client.post(
+            "/api/layout",
+            files={"image": ("photo.jpg", image_bytes, "image/jpeg")},
+            data={"sizeId": "1-inch", "paperType": "letter"},
+        )
+
+        assert res.status_code == 400
+        data = res.json()
+        assert data["success"] is False
+        assert data["errors"][0]["type"] == "validation"
+
+    def test_invalid_size_id_returns_400(self, client: TestClient) -> None:
+        image_bytes = _make_jpeg_bytes()
+
+        res = client.post(
+            "/api/layout",
+            files={"image": ("photo.jpg", image_bytes, "image/jpeg")},
+            data={"sizeId": "invalid-size", "paperType": "6-inch"},
+        )
+
+        assert res.status_code == 400
+        data = res.json()
+        assert data["success"] is False
+        assert data["errors"][0]["type"] == "validation"
+
+    def test_invalid_mime_type_returns_415(self, client: TestClient) -> None:
+        res = client.post(
+            "/api/layout",
+            files={"image": ("file.gif", b"GIF89a", "image/gif")},
+            data={"sizeId": "1-inch", "paperType": "6-inch"},
+        )
+
+        assert res.status_code == 415
+        assert res.json()["success"] is False
+
+    def test_oversized_upload_returns_413(self, client: TestClient) -> None:
+        from src import config as cfg
+
+        oversized = b"x" * (cfg.MAX_UPLOAD_SIZE_BYTES + 1)
+
+        res = client.post(
+            "/api/layout",
+            files={"image": ("photo.jpg", oversized, "image/jpeg")},
+            data={"sizeId": "1-inch", "paperType": "6-inch"},
+        )
+
+        assert res.status_code == 413
+        assert res.json()["success"] is False
+
+    def test_print_layout_is_valid_base64(self, client: TestClient) -> None:
+        import base64
+
+        image_bytes = _make_jpeg_bytes()
+
+        with patch(
+            "src.server.generate_print_layout",
+            return_value=image_bytes,
+        ):
+            res = client.post(
+                "/api/layout",
+                files={"image": ("photo.jpg", image_bytes, "image/jpeg")},
+                data={"sizeId": "1-inch", "paperType": "6-inch"},
+            )
+
+        assert res.status_code == 200
+        layout_b64 = res.json()["printLayout"]
+        decoded = base64.b64decode(layout_b64)
+        assert len(decoded) > 0

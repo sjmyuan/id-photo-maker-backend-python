@@ -1,9 +1,10 @@
 from io import BytesIO
+from typing import cast
 
 from PIL import Image
 
 from src.types.index import PaperMargins
-from src.utils.layout_calculation import PhotoSize, calculate_layout
+from src.utils.layout_calculation import PaperTypeId, PhotoSize, calculate_layout
 
 
 def generate_print_layout(
@@ -14,7 +15,7 @@ def generate_print_layout(
     margins: PaperMargins | None = None,
 ) -> bytes:
     """Generate a high-resolution print-ready layout PNG with multiple ID photos in a grid."""
-    layout = calculate_layout(paper_type, photo_size, dpi, margins)  # type: ignore[arg-type]
+    layout = calculate_layout(cast(PaperTypeId, paper_type), photo_size, dpi, margins)
 
     offset_x = layout.printer_margins.left if layout.printer_margins else 0
     offset_y = layout.printer_margins.top if layout.printer_margins else 0
@@ -55,7 +56,10 @@ def generate_print_layout(
                 - offset_y
                 + row * (layout.photo_height_px + layout.vertical_spacing_px)
             )
-            canvas.paste(resized_photo, (x, y))
+            if resized_photo.mode == "RGBA":
+                canvas.paste(resized_photo, (x, y), mask=resized_photo.split()[3])
+            else:
+                canvas.paste(resized_photo, (x, y))
 
     buf = BytesIO()
     canvas.save(buf, format="JPEG", quality=95, dpi=(dpi, dpi))

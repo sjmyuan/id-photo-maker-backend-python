@@ -24,6 +24,38 @@ ALLOWED_PAPER_TYPES = {"6-inch", "a4"}
 ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
 
 
+def _validate_upload(data: bytes, mime: str) -> JSONResponse | None:
+    """Return an error JSONResponse for an invalid upload, or None when the upload is valid."""
+    if len(data) > config.MAX_UPLOAD_SIZE_BYTES:
+        max_mb = config.MAX_UPLOAD_SIZE_BYTES // (1024 * 1024)
+        return JSONResponse(
+            status_code=413,
+            content={
+                "success": False,
+                "errors": [
+                    {
+                        "type": "validation",
+                        "message": f"File too large. Maximum allowed size is {max_mb} MB.",
+                    }
+                ],
+            },
+        )
+    if mime not in ALLOWED_MIME_TYPES:
+        return JSONResponse(
+            status_code=415,
+            content={
+                "success": False,
+                "errors": [
+                    {
+                        "type": "validation",
+                        "message": "Invalid file type. Only JPEG, PNG, and WebP are supported.",
+                    }
+                ],
+            },
+        )
+    return None
+
+
 @dataclass
 class Models:
     u2net: U2NetModel
@@ -79,39 +111,10 @@ def create_app(models: Models) -> FastAPI:
     ) -> JSONResponse:
         data = await image.read()
 
-        max_mb = config.MAX_UPLOAD_SIZE_BYTES // (1024 * 1024)
-        if len(data) > config.MAX_UPLOAD_SIZE_BYTES:
-            return JSONResponse(
-                status_code=413,
-                content={
-                    "success": False,
-                    "errors": [
-                        {
-                            "type": "validation",
-                            "message": (
-                                f"File too large. Maximum allowed size is {max_mb} MB."
-                            ),
-                        }
-                    ],
-                },
-            )
-
         mime = image.content_type or ""
-        if mime not in ALLOWED_MIME_TYPES:
-            return JSONResponse(
-                status_code=415,
-                content={
-                    "success": False,
-                    "errors": [
-                        {
-                            "type": "validation",
-                            "message": (
-                                "Invalid file type. Only JPEG, PNG, and WebP are supported."
-                            ),
-                        }
-                    ],
-                },
-            )
+        upload_error = _validate_upload(data, mime)
+        if upload_error is not None:
+            return upload_error
 
         # Validate sizeId when provided
         size_option = None
@@ -125,7 +128,7 @@ def create_app(models: Models) -> FastAPI:
                         "errors": [
                             {
                                 "type": "validation",
-                                "message": f"Invalid sizeId: {sizeId}",
+                                "message": "Invalid sizeId. See /api/options for valid values.",
                             }
                         ],
                     },
@@ -217,39 +220,10 @@ def create_app(models: Models) -> FastAPI:
     ) -> JSONResponse:
         data = await image.read()
 
-        if len(data) > config.MAX_UPLOAD_SIZE_BYTES:
-            max_mb = config.MAX_UPLOAD_SIZE_BYTES // (1024 * 1024)
-            return JSONResponse(
-                status_code=413,
-                content={
-                    "success": False,
-                    "errors": [
-                        {
-                            "type": "validation",
-                            "message": (
-                                f"File too large. Maximum allowed size is {max_mb} MB."
-                            ),
-                        }
-                    ],
-                },
-            )
-
         mime = image.content_type or ""
-        if mime not in ALLOWED_MIME_TYPES:
-            return JSONResponse(
-                status_code=415,
-                content={
-                    "success": False,
-                    "errors": [
-                        {
-                            "type": "validation",
-                            "message": (
-                                "Invalid file type. Only JPEG, PNG, and WebP are supported."
-                            ),
-                        }
-                    ],
-                },
-            )
+        upload_error = _validate_upload(data, mime)
+        if upload_error is not None:
+            return upload_error
 
         # Validate sizeId
         selected_size = SIZE_OPTIONS_BY_ID.get(sizeId)
@@ -259,7 +233,10 @@ def create_app(models: Models) -> FastAPI:
                 content={
                     "success": False,
                     "errors": [
-                        {"type": "validation", "message": f"Invalid sizeId: {sizeId}"}
+                        {
+                            "type": "validation",
+                            "message": "Invalid sizeId. See /api/options for valid values.",
+                        }
                     ],
                 },
             )
@@ -448,35 +425,10 @@ def create_app(models: Models) -> FastAPI:
     ) -> JSONResponse:
         data = await image.read()
 
-        max_mb = config.MAX_UPLOAD_SIZE_BYTES // (1024 * 1024)
-        if len(data) > config.MAX_UPLOAD_SIZE_BYTES:
-            return JSONResponse(
-                status_code=413,
-                content={
-                    "success": False,
-                    "errors": [
-                        {
-                            "type": "validation",
-                            "message": f"File too large. Maximum allowed size is {max_mb} MB.",
-                        }
-                    ],
-                },
-            )
-
         mime = image.content_type or ""
-        if mime not in ALLOWED_MIME_TYPES:
-            return JSONResponse(
-                status_code=415,
-                content={
-                    "success": False,
-                    "errors": [
-                        {
-                            "type": "validation",
-                            "message": "Invalid file type. Only JPEG, PNG, and WebP are supported.",
-                        }
-                    ],
-                },
-            )
+        upload_error = _validate_upload(data, mime)
+        if upload_error is not None:
+            return upload_error
 
         selected_size = SIZE_OPTIONS_BY_ID.get(sizeId)
         if not selected_size:
@@ -485,7 +437,10 @@ def create_app(models: Models) -> FastAPI:
                 content={
                     "success": False,
                     "errors": [
-                        {"type": "validation", "message": f"Invalid sizeId: {sizeId}"}
+                        {
+                            "type": "validation",
+                            "message": "Invalid sizeId. See /api/options for valid values.",
+                        }
                     ],
                 },
             )
@@ -512,7 +467,7 @@ def create_app(models: Models) -> FastAPI:
                     height_mm=selected_size.physical_height,
                 ),
                 paper_type=paperType,
-                dpi=300,
+                dpi=config.REQUIRED_DPI,
             )
         except Exception:
             return JSONResponse(

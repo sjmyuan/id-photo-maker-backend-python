@@ -1,5 +1,9 @@
 from src.types.index import PaperMargins
-from src.utils.crop_area_calculation import FaceBox, calculate_initial_crop_area
+from src.utils.crop_area_calculation import (
+    CONSTRAINTS_BY_SIZE,
+    FaceBox,
+    calculate_initial_crop_area,
+)
 from src.utils.dpi_calculation import calculate_dpi
 from src.utils.layout_calculation import PhotoSize, calculate_layout
 
@@ -57,6 +61,105 @@ class TestCalculateInitialCropArea:
         crop = calculate_initial_crop_area(face, 1.0, 500, 500)
         assert crop.width > 0
         assert crop.height > 0
+
+
+class TestConstraintsBasedCropArea:
+    """Constraints-based crop for large-1-inch (33×48mm):
+    - face height: 15mm–22mm  → fraction of photo height ∈ [15/48, 22/48]
+    - top margin (head to upper boundary): 3mm–5mm → fraction ∈ [3/48, 5/48]
+    - chin to lower boundary: > 7mm → fraction > 7/48
+    """
+
+    _ASPECT = 33 / 48
+    _PHOTO_H_MM = 48.0
+    _PHOTO_W_MM = 33.0
+
+    def _constraints(self):  # type: ignore[return]
+        return CONSTRAINTS_BY_SIZE["large-1-inch"]
+
+    def _make_face(self, face_h: float = 200.0, face_w: float = 160.0) -> FaceBox:
+        """Centre a face in a large 2000×3000 image."""
+        cx, cy = 1000.0, 1500.0
+        return FaceBox(
+            x=cx - face_w / 2,
+            y=cy - face_h / 2,
+            width=face_w,
+            height=face_h,
+        )
+
+    def test_face_height_fraction_within_target_range(self) -> None:
+        face = self._make_face()
+        crop = calculate_initial_crop_area(
+            face, self._ASPECT, 2000, 3000, constraints=self._constraints()
+        )
+        face_h_fraction = face.height / crop.height
+        assert (
+            face_h_fraction >= 15 / 48 - 0.02
+        ), f"face_h_fraction={face_h_fraction:.4f} below min"
+        assert (
+            face_h_fraction <= 22 / 48 + 0.02
+        ), f"face_h_fraction={face_h_fraction:.4f} above max"
+
+    def test_top_margin_fraction_within_target_range(self) -> None:
+        face = self._make_face()
+        crop = calculate_initial_crop_area(
+            face, self._ASPECT, 2000, 3000, constraints=self._constraints()
+        )
+        # Space from crop top to face bbox top, minus estimated crown height,
+        # should correspond to the 3mm–5mm top margin.
+        from src.utils.crop_area_calculation import _CROWN_FRACTION
+
+        space_above_face = face.y - crop.y
+        crown_correction = face.height * _CROWN_FRACTION
+        top_margin_fraction = (space_above_face - crown_correction) / crop.height
+        assert (
+            top_margin_fraction >= 3 / 48 - 0.02
+        ), f"top_margin_fraction={top_margin_fraction:.4f} below min"
+        assert (
+            top_margin_fraction <= 5 / 48 + 0.02
+        ), f"top_margin_fraction={top_margin_fraction:.4f} above max"
+
+    def test_bottom_margin_exceeds_minimum(self) -> None:
+        face = self._make_face()
+        crop = calculate_initial_crop_area(
+            face, self._ASPECT, 2000, 3000, constraints=self._constraints()
+        )
+        bottom_margin_fraction = (
+            crop.y + crop.height - (face.y + face.height)
+        ) / crop.height
+        assert (
+            bottom_margin_fraction > 7 / 48 - 0.01
+        ), f"bottom_margin_fraction={bottom_margin_fraction:.4f} below min 7/48"
+
+    def test_aspect_ratio_preserved_with_constraints(self) -> None:
+        face = self._make_face()
+        crop = calculate_initial_crop_area(
+            face, self._ASPECT, 2000, 3000, constraints=self._constraints()
+        )
+        assert abs(crop.width / crop.height - self._ASPECT) < 1e-5
+
+    def test_crop_stays_within_image_bounds(self) -> None:
+        face = self._make_face()
+        crop = calculate_initial_crop_area(
+            face, self._ASPECT, 2000, 3000, constraints=self._constraints()
+        )
+        assert crop.x >= 0
+        assert crop.y >= 0
+        assert crop.x + crop.width <= 2000
+        assert crop.y + crop.height <= 3000
+
+    def test_constraints_lookup_key_exists(self) -> None:
+        assert "large-1-inch" in CONSTRAINTS_BY_SIZE
+
+    def test_no_constraints_falls_back_to_defaults(self) -> None:
+        # Without constraints the existing default multipliers are used:
+        # vertical_above ≈ 1.0×face_h, vertical_below ≈ 0.6×face_h
+        face = FaceBox(x=400, y=400, width=100, height=100)
+        crop = calculate_initial_crop_area(face, 1.0, 2000, 2000)
+        space_above = face.y - crop.y
+        assert (
+            abs(space_above - 100.0) < 5.0
+        ), f"space_above={space_above}, expected ≈100"
 
 
 # ── dpi_calculation ────────────────────────────────────────────────────────────
